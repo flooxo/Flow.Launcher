@@ -7,11 +7,13 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Markup;
-using System.Windows.Media;
 using System.Windows.Media.Effects;
 using Flow.Launcher.Infrastructure;
 using Flow.Launcher.Infrastructure.Logger;
 using Flow.Launcher.Infrastructure.UserSettings;
+using System.Drawing.Drawing2D;
+using System.Drawing;
+using FontFamily = System.Windows.Media.FontFamily;
 
 namespace Flow.Launcher.Core.Resource
 {
@@ -312,7 +314,8 @@ namespace Flow.Launcher.Core.Resource
             ACCENT_ENABLE_GRADIENT = 1,
             ACCENT_ENABLE_TRANSPARENTGRADIENT = 2,
             ACCENT_ENABLE_BLURBEHIND = 3,
-            ACCENT_INVALID_STATE = 4
+            ACCENT_ENABLE_ACRYLICBLURBEHIND = 4,
+            ACCENT_INVALID_STATE = 5
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -346,7 +349,8 @@ namespace Flow.Launcher.Core.Resource
         {
             if (BlurEnabled)
             {
-                SetWindowAccent(Application.Current.MainWindow, AccentState.ACCENT_ENABLE_BLURBEHIND);
+                // SetWindowAccent(Application.Current.MainWindow, AccentState.ACCENT_ENABLE_BLURBEHIND);
+                SetIrregularBlur(Application.Current.MainWindow);
             }
             else
             {
@@ -391,6 +395,74 @@ namespace Flow.Launcher.Core.Resource
             SetWindowCompositionAttribute(windowHelper.Handle, ref data);
 
             Marshal.FreeHGlobal(accentPtr);
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DwmBlurBehind
+        {
+            public uint dwFlags;
+            public bool fEnable;
+            public IntPtr hRgnBlur;
+            public bool fTransitionOnMaximized;
+
+            public DwmBlurBehind(bool enable)
+            {
+                dwFlags = 0x00000001;
+                fEnable = enable;
+                hRgnBlur = IntPtr.Zero;
+                fTransitionOnMaximized = false;
+            }
+
+            public void SetRegion(Graphics graphics, Region region)
+            {
+                hRgnBlur = region.GetHrgn(graphics);
+            }
+        }
+
+        internal static class DwmApi
+        {
+            [DllImport("dwmapi.dll")]
+            public static extern int DwmEnableBlurBehindWindow(IntPtr hWnd, ref DwmBlurBehind blurBehind);
+        }
+
+        private void SetIrregularBlur(Window w)
+        {
+            var helper = new WindowInteropHelper(w);
+            var hwnd = helper.Handle;
+
+            // Create a GraphicsPath for the irregular shape (customize it as needed)
+            var path = AddRoundRectangle(new Rectangle(0, 0, (int)w.Width, (int)w.Height), 1); // Adjust the corner radius as needed
+
+            var dbb = new DwmBlurBehind(true);
+            dbb.SetRegion(Graphics.FromHwnd(hwnd), new Region(path));
+
+            // Enable blur for the specified region
+            DwmApi.DwmEnableBlurBehindWindow(hwnd, ref dbb);
+        }
+
+        public static dynamic AddRoundRectangle(Rectangle bounds, int cornerRadius)
+        {
+            var path = new GraphicsPath();
+            int diameter = cornerRadius * 2;
+            var size = new System.Drawing.Size(diameter, diameter);
+            Rectangle arc = new Rectangle(bounds.Location, size);
+
+            // Top left
+            path.AddArc(arc, 180, 90);
+            arc.X = bounds.Right - diameter;
+
+            // Top right
+            path.AddArc(arc, 270, 90);
+            arc.Y = bounds.Bottom - diameter;
+
+            // Bottom right
+            path.AddArc(arc, 0, 90);
+            arc.X = bounds.Left;
+
+            // Bottom left
+            path.AddArc(arc, 90, 90);
+            path.CloseFigure();
+            return path;
         }
         #endregion
     }
